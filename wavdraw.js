@@ -1,11 +1,11 @@
-// WavDraw.js 0.0.1 - JavaScript PCM plotting library
+// WavDraw.js 0.0.2 - JavaScript PCM plotting library
 // Author - Michael Toymil
 // Dependencies - Raphael.js, underscore.js, jQuery (TODO: get rid of this)
 
 (function(glob) {
   'use strict';
   // 'glob' is usually the window
-  var version = '0.0.1';
+  var version = '0.0.2';
   var Raphael = glob.Raphael;
   var defaultOptions = {
     // Drawing options
@@ -21,7 +21,6 @@
     
     // Loading feature options
     useloading: false,
-    loaded: true,
     loadingStrokeWidth: 1,
     loadingStrokeColor: "#555"
   }
@@ -42,9 +41,20 @@
     var priv = {
       path: null,
       loadingPath: null,
-      drawWave: function(buffer, color, width) {
+      buffer: null,
+      bufferStart: 0,
+      lastX: 0,
+      lastY: 0,
+      loaded: false,
+
+      drawWave: function(buffer, color, width, startX, startY, bufferStart, progress) {
+        startX = startX || 0;
+        startY = startY || paper.height/2;
+        bufferStart = bufferStart || 0;
+   
         // Setup
         var maxAmp, bufferView;
+        
         switch(options.bitDepth) { // TODO: Add other depths
           case 16:
             maxAmp = 32768;
@@ -53,11 +63,21 @@
           default:
             break;
         }
-        
+
+        var end = (progress == undefined) ? bufferView.length : Math.floor(progress * bufferView.length);
         // Generate the SVG style pathstring
-        var ps = "M0,"+(paper.height/2);
-        for (var i=0; i<bufferView.length; i=i+options.skip) {
-          ps += "L"+ ((i/bufferView.length)*paper.width) + "," + ((paper.height/2)-(bufferView[i]/maxAmp)*(paper.height/2))
+        var x, y;
+        var ps = "M" + startX + "," + startY;
+        for (var i=bufferStart; i<=end; i=i+options.skip) {
+          x = ((i/bufferView.length)*paper.width);
+          y = ((paper.height/2)-(bufferView[i]/maxAmp)*(paper.height/2))
+          ps += "L"+ x + "," + y;
+        }
+
+        if (progress != undefined) {
+          priv.lastX = x || priv.lastX;
+          priv.lastY = y || priv.lastY;
+          priv.bufferStart = end;
         }
 
         var path = paper.path(ps);
@@ -66,20 +86,9 @@
         return path;
       },
 
-      getProgressSubpath: function(progress, path) {
-        var subpathLength = path.getTotalLength() * progress
-        var subpath = path.getSubpath(0,subpathLength);
+      drawProgressSubpath: function(progress, buffer) {
+        var subpath = priv.drawWave(buffer, options.strokeColor, options.strokeWidth, priv.lastX, priv.lastY, priv.bufferStart, progress);
         return subpath;
-      },
-
-      updateMain: function(subpath) {
-        if (!this.path) {
-          this.path = paper.path(subpath);
-          this.path.attr('stroke-width', options.strokeWidth);
-          this.path.attr('stroke', options.strokeColor);
-        }
-        
-        this.path.attr('path', subpath);
       }
     }
     
@@ -90,6 +99,7 @@
       // Load in PCM buffer to draw
       loadPCM: function(buffer) {
         var path, color, width;
+        priv.buffer = buffer;
         if (options.useLoading) {
           color = options.loadingStrokeColor;
           width = options.loadingStrokeWidth;
@@ -97,15 +107,16 @@
           color = options.strokeColor;
           width = options.strokeWidth;
         }
-        
+
         path = priv.drawWave(buffer, color, width);
 
         (options.useLoading) ? (priv.loadingPath = path) : (priv.path = path);
+        priv.loaded = true;
       },
      
       // For the loading progress feature only
       setProgress: function(progress) {
-        if (!options.useLoading) {
+        if (!options.useLoading || !priv.loaded) {
           return;
         }
 
@@ -113,9 +124,7 @@
           return;
         }
 
-        var subpath = priv.getProgressSubpath(progress, priv.loadingPath);
-        priv.updateMain(subpath)
-
+        priv.drawProgressSubpath(progress, priv.buffer);
       },
 
       // Returns Raphael paper instance
